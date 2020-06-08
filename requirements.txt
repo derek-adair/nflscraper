@@ -1,3 +1,4 @@
 aiohttp
 aiofiles
 beautifulsoup4
+pytest

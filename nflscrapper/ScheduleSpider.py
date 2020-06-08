@@ -22,13 +22,21 @@ logging.basicConfig(
 logger = logging.getLogger("nfl-scrape-async")
 logging.getLogger("chardet.charsetprober").disabled = True
 
-URL_STR = "https://www.nfl.com/schedules/{}/{}"
+URL_STR = "https://www.nfl.com/schedules/{}/{}{}"
 
-SEASON_WEEKS = (
+SEASON_PHASES = (
             ('PRE', range(0, 4)),
             ('REG', range(1, 17)),
             ('POST', range(1, 4)),
         )
+
+def build_urls(year):
+    urls = []
+    for phase_dict in SEASON_PHASES:
+        for week_num in phase_dict[1]:
+            urls.append(URL_STR.format(year, phase_dict[0], week_num))
+
+    return urls
 
 async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
     """GET request wrapper to fetch page HTML.
