@@ -8,6 +8,9 @@ import logging
 import re
 import sys
 from typing import IO
+import argparse
+
+from datetime import datetime
 
 import aiofiles
 import aiohttp
@@ -110,7 +113,16 @@ if __name__ == "__main__":
     here = pathlib.Path(__file__).parent
 
     outpath = here.joinpath("schedule.json")
-    with open(outpath, "w") as outfile:
-        outfile.write("source_url\tparsed_url\n")
+
+    parser = argparse.ArgumentParser(
+        description='Updates nflgame\'s schedule',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    aa = parser.add_argument
+    aa('--year', default=datetime.now().year, type=int,
+       help='Force the update to a specific year.')
+
+    args = parser.parse_args()
+
+    urls = build_urls(args.year)
 
     asyncio.run(bulk_crawl_and_write(file=outpath, urls=urls))
