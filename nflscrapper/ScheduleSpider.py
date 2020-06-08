@@ -19,16 +19,15 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
     stream=sys.stderr,
 )
-logger = logging.getLogger("areq")
+logger = logging.getLogger("nfl-scrape-async")
 logging.getLogger("chardet.charsetprober").disabled = True
 
 URL_STR = "https://www.nfl.com/schedules/{}/{}"
 
-GAME_SOUP = 
 SEASON_WEEKS = (
-            ('PRE', range(0, 4 + 1)),
-            ('REG', range(1, 17 + 1)),
-            ('POST', range(1, 4 + 1)),
+            ('PRE', range(0, 4)),
+            ('REG', range(1, 17)),
+            ('POST', range(1, 4)),
         )
 
 async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
@@ -102,7 +101,7 @@ if __name__ == "__main__":
     assert sys.version_info >= (3, 7), "Script requires Python 3.7+."
     here = pathlib.Path(__file__).parent
 
-    outpath = here.joinpath("foundurls.txt")
+    outpath = here.joinpath("schedule.json")
     with open(outpath, "w") as outfile:
         outfile.write("source_url\tparsed_url\n")
 
