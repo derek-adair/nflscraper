@@ -2,19 +2,21 @@
 # areq.py
 
 """Asynchronously get links embedded in multiple pages' HMTL."""
-
-import asyncio
-import logging
 import re
+import json
 import sys
-from typing import IO
-import argparse
+import logging
+import time
+import random
+import asyncio
+import os
 
-from datetime import datetime
+from bs4 import BeautifulSoup
 
 import aiofiles
 import aiohttp
 from aiohttp import ClientSession
+from asyncio_throttle import Throttler
 
 logging.basicConfig(
     format="%(asctime)s %(levelname)s:%(name)s: %(message)s",
@@ -25,11 +27,11 @@ logging.basicConfig(
 logger = logging.getLogger("nfl-scrape-async")
 logging.getLogger("chardet.charsetprober").disabled = True
 
-URL_STR = "https://www.nfl.com/schedules/{}/{}{}"
+URL_STR = "https://www.nfl.com/schedules/{year}/{phase}{week_num}"
 
 SEASON_PHASES = (
             ('PRE', range(0, 4)),
-            ('REG', range(1, 17)),
+            ('REG', range(1,17)),
             ('POST', range(1, 4)),
         )
 
@@ -37,8 +39,7 @@ def build_urls(year):
     urls = []
     for phase_dict in SEASON_PHASES:
         for week_num in phase_dict[1]:
-            urls.append(URL_STR.format(year, phase_dict[0], week_num))
-
+            urls.append(URL_STR.format(year=year, phase=phase_dict[0], week_num=week_num))
     return urls
 
 async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
@@ -46,7 +47,6 @@ async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
 
     kwargs are passed to `session.request()`.
     """
-
     resp = await session.request(method="GET", url=url, **kwargs)
     resp.raise_for_status()
     logger.info("Got response [%s] for URL: %s", resp.status, url)
@@ -54,7 +54,7 @@ async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
     return html
 
 async def parse(url: str, session: ClientSession, **kwargs) -> set:
-    games = set()
+    games = []
     try:
         html = await fetch_html(url=url, session=session, **kwargs)
     except (
@@ -74,55 +74,62 @@ async def parse(url: str, session: ClientSession, **kwargs) -> set:
         )
         return games
     else:
-        for link in HREF_RE.findall(html):
-            try:
-                abslink = urllib.parse.urljoin(url, link)
-            except (urllib.error.URLError, ValueError):
-                logger.exception("Error parsing URL: %s", link)
-                pass
-            else:
-                found.add(abslink)
-        logger.info("Found %d links for %s", len(found), url)
+        page_soup = BeautifulSoup(html, 'html.parser')
+
+        matchup_groups = page_soup.select("section.nfl-o-matchup-group")
+
+        for group in matchup_groups:
+            datestr = group.find("h2", class_="d3-o-section-title").get_text()
+
+            game_strips = group.select("div.nfl-c-matchup-strip")
+            for strip in game_strips:
+                team_abbv = strip.select("span.nfl-c-matchup-strip__team-abbreviation")
+                games += [{
+                            "date": datestr,
+                            "time": strip.select("span.nfl-c-matchup-strip__date-time")[0].get_text().strip(),
+                            "away": team_abbv[0].get_text().strip(),
+                            "home": team_abbv[1].get_text().strip(),
+                        }]
+
+        logger.info("Found %d links for %s", len(games), url)
         return games
 
-async def write_one(file: IO, url: str, **kwargs) -> None:
-    """Write the found HREFs from `url` to `file`."""
-    res = await parse(url=url, **kwargs)
-    if not res:
-        return None
-    async with aiofiles.open(file, "a") as f:
-        for p in res:
-            await f.write(f"{url}\t{p}\n")
-        logger.info("Wrote results for source URL: %s", url)
+async def write_results(data: dict) -> None:
+    outfile = os.path.join(os.path.dirname(__file__), 'schedule.json')
+    json_str = json.dumps(data)
+    async with aiofiles.open(outfile, "w+") as f:
+        await f.write(json_str)
+        logger.info("Wrote results for source URLs")
 
-async def bulk_crawl_and_write(file: IO, urls: set, **kwargs) -> None:
-    """Crawl & write concurrently to `file` for multiple `urls`."""
+async def worker(throttler, session, urls):
+    games = list()
+    logger.info("Worker fetching {} urls".format(len(urls)))
+    for url in urls:
+        async with throttler:
+            games += await parse(url, session)
+    await write_results(games)
+
+async def main():
+    throttler = Throttler(rate_limit=3, period=3)
     async with ClientSession() as session:
-        tasks = []
-        for url in urls:
-            tasks.append(
-                write_one(file=file, url=url, session=session, **kwargs)
-            )
-        await asyncio.gather(*tasks)
+        urls = build_urls(2020)
+        tasks = [loop.create_task(worker(throttler, session, urls))]
+        await asyncio.wait(tasks)
 
 if __name__ == "__main__":
-    import pathlib
-    import sys
-
     assert sys.version_info >= (3, 7), "Script requires Python 3.7+."
-    here = pathlib.Path(__file__).parent
 
-    outpath = here.joinpath("schedule.json")
+    #parser = argparse.ArgumentParser(
+    #    description='Updates nflgame\'s schedule',
+    #    formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    #aa = parser.add_argument
+    #aa('--year', default=datetime.now().year, type=int,
+    #   help='Force the update to a specific year.')
 
-    parser = argparse.ArgumentParser(
-        description='Updates nflgame\'s schedule',
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    aa = parser.add_argument
-    aa('--year', default=datetime.now().year, type=int,
-       help='Force the update to a specific year.')
+    #args = parser.parse_args()
 
-    args = parser.parse_args()
+    #urls = build_urls(args.year)
 
-    urls = build_urls(args.year)
-
-    asyncio.run(bulk_crawl_and_write(file=outpath, urls=urls))
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(main())
+    loop.close()
