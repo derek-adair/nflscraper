@@ -2,12 +2,10 @@
 # areq.py
 
 """Asynchronously get links embedded in multiple pages' HMTL."""
-import re
 import json
 import sys
 import logging
 import time
-import random
 import asyncio
 import os
 
