@@ -21,6 +21,8 @@ logging.basicConfig(
     level=logging.DEBUG,
     datefmt="%H:%M:%S",
     stream=sys.stderr,
+    """Worker that will take a list of urls and parse/throttle them
+    """
 )
 logger = logging.getLogger("nfl-scrape-async")
 logging.getLogger("chardet.charsetprober").disabled = True
@@ -28,20 +30,22 @@ logging.getLogger("chardet.charsetprober").disabled = True
 URL_STR = "https://www.nfl.com/schedules/{year}/{phase}{week_num}"
 
 SEASON_PHASES = (
-            ('PRE', range(0, 4)),
-            ('REG', range(1,17)),
-            ('POST', range(1, 4)),
+            #('PRE', range(0, 4)),
+            ('REG', range(1,17+1)),
+            ('POST', range(1, 4+1)),
         )
 
 def build_urls(year):
     urls = []
     for phase_dict in SEASON_PHASES:
-        for week_num in phase_dict[1]:
-            urls.append(URL_STR.format(year=year, phase=phase_dict[0], week_num=week_num))
+        season_phase, week_range = phase_dict
+        for week_num in week_range:
+            urls.append(URL_STR.format(year=year, phase=season_phase, week_num=week_num))
     return urls
 
 async def fetch_html(url: str, session: ClientSession, **kwargs) -> str:
     """GET request wrapper to fetch page HTML.
+
 
     kwargs are passed to `session.request()`.
     """
@@ -99,20 +103,25 @@ async def write_results(data: dict) -> None:
         await f.write(json_str)
         logger.info("Wrote results for source URLs")
 
-async def worker(throttler, session, urls):
-    games = list()
-    logger.info("Worker fetching {} urls".format(len(urls)))
-    for url in urls:
-        async with throttler:
-            games += await parse(url, session)
-    await write_results(games)
 
 async def main():
+    """Main program for setting up task and throttler
+    """
     throttler = Throttler(rate_limit=3, period=3)
     async with ClientSession() as session:
         urls = build_urls(2020)
         tasks = [loop.create_task(worker(throttler, session, urls))]
         await asyncio.wait(tasks)
+
+async def worker(throttler, session, urls):
+    """Worker that will take a list of urls and parse/throttle them
+    """
+    data = list()
+    logger.info("Worker fetching {} urls".format(len(urls)))
+    for url in urls:
+        async with throttler:
+            data += await parse(url, session)
+    await write_results(data)
 
 if __name__ == "__main__":
     assert sys.version_info >= (3, 7), "Script requires Python 3.7+."
