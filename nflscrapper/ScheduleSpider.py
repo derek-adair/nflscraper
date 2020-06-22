@@ -21,8 +21,6 @@ logging.basicConfig(
     level=logging.DEBUG,
     datefmt="%H:%M:%S",
     stream=sys.stderr,
-    """Worker that will take a list of urls and parse/throttle them
-    """
 )
 logger = logging.getLogger("nfl-scrape-async")
 logging.getLogger("chardet.charsetprober").disabled = True
